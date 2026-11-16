@@ -1,7 +1,11 @@
 # 医疗健康数据平台与疾病统计分析
 
+[![CI](https://github.com/qishuiko7/MedHealth/actions/workflows/ci.yml/badge.svg)](https://github.com/qishuiko7/MedHealth/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
+
 > 基于 Hadoop 生态的大数据仓库 + 机器学习 + 实时流处理 + Web 可视化全链路项目
-> 课程：《大数据平台架构与应用开发课程设计》 · 人工智能与大数据学院 · 2026 年 10 月
+> 课程：《大数据平台架构与应用开发课程设计》 · 2026 年 10 月
 
 一个完整的医疗健康数据分析平台：从**模拟数据生成与脱敏**，到 **Hive 四层数据仓库建模**，再到 **Spark SQL 统计分析 / MLlib 机器学习 / GraphX 图计算**，最终通过 **Flask Web 平台**提供 13 个页面、34 张图表的可视化展示，并附带 **Kafka + Spark Streaming 实时链路**。
 

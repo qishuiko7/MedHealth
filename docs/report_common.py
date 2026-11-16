@@ -164,7 +164,7 @@ def fill_cover(rep, title):
     c2.text = title
     _fmt_cover_cell(c2, 18, font="黑体", bold=False)
     # 学院
-    t.cell(3, 3).text = "人工智能与大数据学院"
+    t.cell(3, 3).text = "XX 学院"
     # 专业班级 / 学号 / 学生姓名 / 报告成绩 留空，由学生本人按课程要求手工填写
     t.cell(4, 3).text = ""
     t.cell(5, 3).text = ""
