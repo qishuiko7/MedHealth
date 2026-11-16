@@ -70,13 +70,36 @@
 # 1. 安装 Python 依赖
 pip install -r requirements.txt
 
-# 2. 准备 MySQL 8.0（需可被 127.0.0.1:3306 访问）
+# 2. 配置环境变量（可选，不配也能跑，会使用演示默认值）
+cp .env.example .env
+#    然后编辑 .env，填入你自己的数据库口令等
 
-# 3. 导入数据库备份（含全部业务数据与统计结果）
+# 3. 准备 MySQL 8.0（需可被 127.0.0.1:3306 访问）
+
+# 4. 导入数据库备份（含全部业务数据与统计结果）
 mysql -u root -p < database/med_health_数据备份.sql
 ```
 
-> 数据库连接参数在 `data_generator/config.py` 的 `MYSQL` 字典中，按本机实际情况修改。
+#### 环境变量说明
+
+所有配置项均支持**环境变量优先**，未设置时回落到代码内默认值：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `MED_MYSQL_HOST` | `127.0.0.1` | 数据库地址 |
+| `MED_MYSQL_PORT` | `3306` | 数据库端口 |
+| `MED_MYSQL_USER` | `root` | 数据库用户 |
+| `MED_MYSQL_PASSWORD` | `123456` | 数据库口令 |
+| `MED_MYSQL_DATABASE` | `med_health` | 业务库名 |
+| `MED_WEB_HOST` | `127.0.0.1` | Web 监听地址 |
+| `MED_WEB_PORT` | `5000` | Web 监听端口 |
+| `MED_WEB_SECRET_KEY` | `dev-only-change-me` | Flask 会话密钥 |
+| `MED_ADMIN_PWD` | `admin123` | 管理员口令 |
+| `MED_DOCTOR_PWD` | `doctor123` | 医师口令 |
+| `MED_VIEWER_PWD` | `viewer123` | 访客口令 |
+
+> `.env` 已被 `.gitignore` 排除，不会提交到仓库，可安全填写真实口令。
+> 完整模板见 [.env.example](.env.example)。
 
 ### 方式一：只看可视化平台（最常用，约 10 秒）
 

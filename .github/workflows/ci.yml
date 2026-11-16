@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  lint-and-check:
+    name: 代码检查 (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 语法检查（所有 Python 文件）
+        run: |
+          echo "=== 编译检查全部 .py 文件 ==="
+          python -m compileall -q . -x '(^|/)(\.git|output|node_modules)/' && echo "✅ 语法检查通过"
+
+      - name: 检查必需文件是否齐全
+        run: |
+          echo "=== 检查复现必需文件 ==="
+          missing=0
+          for f in requirements.txt README.md LICENSE .env.example \
+                   database/med_health_数据备份.sql \
+                   run_all.py web/app.py data_generator/config.py; do
+            if [ -e "$f" ]; then
+              echo "✅ $f"
+            else
+              echo "❌ 缺失: $f"
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: 验证核心模块可导入
+        run: |
+          echo "=== 验证配置模块 ==="
+          cd data_generator && python -c "
+          import config as C
+          assert C.MYSQL['host'], 'MYSQL host 为空'
+          assert len(C.USERS) == 3, '账号数量异常'
+          print('MYSQL host :', C.MYSQL['host'])
+          print('MYSQL db   :', C.MYSQL['database'])
+          print('USERS      :', list(C.USERS.keys()))
+          print('✅ 配置模块正常')
+          "
+
+      - name: 验证脱敏模块逻辑
+        run: |
+          echo "=== 验证脱敏函数 ==="
+          cd data_generator && python -c "
+          from desensitize import mask_name, mask_phone, mask_id_card, DESENSITIZE_RULES
+          # 姓名脱敏
+          assert mask_name('张三丰') == '张**', mask_name('张三丰')
+          # 手机号脱敏
+          assert mask_phone('13800001234') == '138****1234', mask_phone('13800001234')
+          # 身份证哈希不可逆
+          h = mask_id_card('110101199001011234')
+          assert h and len(h) == 16, h
+          assert mask_id_card('110101199001011234') == h, '哈希不稳定'
+          # 规则清单完整
+          assert len(DESENSITIZE_RULES) >= 8, len(DESENSITIZE_RULES)
+          print('姓名脱敏  :', mask_name('张三丰'))
+          print('手机脱敏  :', mask_phone('13800001234'))
+          print('身份证哈希:', h)
+          print('脱敏规则数:', len(DESENSITIZE_RULES))
+          print('✅ 脱敏模块正常')
+          "
+
+      - name: 安全扫描（检查是否误提交密钥）
+        run: |
+          echo "=== 扫描疑似密钥 ==="
+          found=0
+          if grep -rInE '(gho_|ghp_|github_pat_|sk-[A-Za-z0-9]{20,})' \
+               --include='*.py' --include='*.md' --include='*.sh' \
+               --include='*.yml' --include='*.yaml' . 2>/dev/null; then
+            echo "❌ 发现疑似 token"
+            found=1
+          fi
+          if [ -e .env ]; then
+            echo "❌ .env 不应被提交"
+            found=1
+          fi
+          if [ $found -eq 0 ]; then
+            echo "✅ 未发现泄露的密钥"
+          fi
+          exit $found
+
+  web-smoke:
+    name: Web 平台冒烟测试
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 检查 Flask 应用可加载
+        run: |
+          cd web && python -c "
+          import app
+          assert app.app is not None, 'Flask app 未创建'
+          print('Flask 应用对象:', app.app)
+          print('路由数量:', len(list(app.app.url_map.iter_rules())))
+          print('✅ Web 应用可正常加载')
+          "
