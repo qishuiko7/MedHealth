@@ -49,28 +49,32 @@ HASH_SALT = "MED_PLATFORM_2026_JLAU"
 # ---------------------------------------------------------------------------
 # MySQL 配置（本地）
 # ---------------------------------------------------------------------------
+# 建议通过环境变量覆盖，避免把真实口令写进代码：
+#   set MED_MYSQL_PASSWORD=你的口令
 MYSQL = {
-    "host": "127.0.0.1",
-    "port": 3306,
-    "user": "root",
-    "password": "123456",
-    "database": "med_health",
+    "host": os.getenv("MED_MYSQL_HOST", "127.0.0.1"),
+    "port": int(os.getenv("MED_MYSQL_PORT", "3306")),
+    "user": os.getenv("MED_MYSQL_USER", "root"),
+    "password": os.getenv("MED_MYSQL_PASSWORD", "123456"),
+    "database": os.getenv("MED_MYSQL_DATABASE", "med_health"),
     "charset": "utf8mb4",
 }
 
 # ---------------------------------------------------------------------------
 # Flask 配置
 # ---------------------------------------------------------------------------
-WEB_HOST = "127.0.0.1"
-WEB_PORT = 5000
-WEB_SECRET_KEY = "med-health-platform-secret-key-2026"
+WEB_HOST = os.getenv("MED_WEB_HOST", "127.0.0.1")
+WEB_PORT = int(os.getenv("MED_WEB_PORT", "5000"))
+# 生产环境请通过环境变量设置随机密钥
+WEB_SECRET_KEY = os.getenv("MED_WEB_SECRET_KEY", "dev-only-change-me")
 
-# 平台账号（用户名 -> 密码, 显示名, 角色）
+# 平台演示账号（用户名 -> 密码, 显示名, 角色）
 # 角色：admin 管理员（全部权限）/ doctor 医师（不可导出敏感明细）/ viewer 访客（只读）
+# 注意：以下为课程演示用弱口令，仅供本地演示；实际部署请自行修改。
 USERS = {
-    "admin":  {"password": "admin123",  "display": "系统管理员", "role": "admin"},
-    "doctor": {"password": "doctor123", "display": "临床医师",   "role": "doctor"},
-    "viewer": {"password": "viewer123", "display": "数据访客",   "role": "viewer"},
+    "admin":  {"password": os.getenv("MED_ADMIN_PWD", "admin123"),   "display": "系统管理员", "role": "admin"},
+    "doctor": {"password": os.getenv("MED_DOCTOR_PWD", "doctor123"), "display": "临床医师",   "role": "doctor"},
+    "viewer": {"password": os.getenv("MED_VIEWER_PWD", "viewer123"), "display": "数据访客",   "role": "viewer"},
 }
 
 # ---------------------------------------------------------------------------

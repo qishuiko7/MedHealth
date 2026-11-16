@@ -101,11 +101,11 @@ export PORT_FLASK="5000"
 # -----------------------------------------------------------------------------
 export HIVE_META_DB="hive_meta"                 # Hive Metastore 元数据 schema
 export HIVE_META_USER="hive"                    # Hive 元数据库账号
-export HIVE_META_PWD="hive123456"               # 生产环境请改强密码
-export MYSQL_ROOT_PWD="root123456"
+export HIVE_META_PWD="${HIVE_META_PWD:-change-me-hive}"   # 建议部署前用环境变量覆盖
+export MYSQL_ROOT_PWD="${MYSQL_ROOT_PWD:-change-me-root}"
 export BIZ_DB="med_health"                      # 业务库（与主工程 config.py 一致）
 export BIZ_USER="med"
-export BIZ_PWD="med123456"
+export BIZ_PWD="${BIZ_PWD:-change-me-biz}"
 
 # MySQL JDBC 连接串（Hive 元数据库）
 export MYSQL_JDBC_URL="jdbc:mysql://${HOSTNAME_MASTER}:${PORT_MYSQL}/${HIVE_META_DB}?useSSL=false&useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
