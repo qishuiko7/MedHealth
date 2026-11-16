@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ code }}{% endblock %}
+{% block pagetitle %}{{ code }} · {{ msg }}{% endblock %}
+{% block content %}
+<div class="card"><div class="bd" style="text-align:center;padding:60px 20px">
+  <div style="font-size:52px;font-weight:700;color:#1f6feb">{{ code }}</div>
+  <p style="color:#6b7280;margin:10px 0 22px">{{ msg }}</p>
+  <a class="btn primary" href="{{ url_for('dashboard') }}">返回综合概览大屏</a>
+</div></div>
+{% endblock %}

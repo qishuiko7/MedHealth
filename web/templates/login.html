@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · 医疗健康数据平台与疾病统计分析</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-card" method="post" action="{{ url_for('login') }}">
+    <h2>医疗健康数据平台</h2>
+    <p class="sub">疾病统计分析与可视化系统 · 大数据平台架构与应用开发课程设计</p>
+    {% with msgs = get_flashed_messages() %}
+      {% for m in msgs %}<div class="flash">{{ m }}</div>{% endfor %}
+    {% endwith %}
+    <label style="font-size:12.5px;color:#6b7280">用户名</label>
+    <input type="text" name="username" placeholder="请输入用户名" autocomplete="username" required>
+    <label style="font-size:12.5px;color:#6b7280">密码</label>
+    <input type="password" name="password" placeholder="请输入密码" autocomplete="current-password" required>
+    <button type="submit">登 录</button>
+    <div class="login-hint">
+      <b>演示账号（分角色权限）：</b><br>
+      管理员 admin / admin123 —— 全部功能 + 报表导出<br>
+      医师　 doctor / doctor123 —— 全部分析页，不可导出<br>
+      访客　 viewer / viewer123 —— 仅概览、疾病分布、就诊高峰
+    </div>
+  </form>
+</div>
+</body>
+</html>

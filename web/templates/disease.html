@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}疾病分布分析{% endblock %}
+{% block pagetitle %}疾病分布分析{% endblock %}
+{% block pagesub %}疾病谱构成 · 单病种排名 · 传染病标识{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <label>统计周期</label>
+  <select id="period" class="filter"></select>
+  <label>分析维度</label>
+  <select id="dim" class="filter">
+    <option value="类别">疾病大类</option>
+    <option value="疾病">具体病种（ICD-10）</option>
+  </select>
+  <span class="badge" id="sumBadge"></span>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>疾病构成条形图 TOP15</h3><span class="sub">按就诊人次降序</span></div>
+    <div class="bd"><div id="cBar" class="chart h420"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>疾病构成占比</h3><span class="sub">TOP12 占比，其余归入「其他」</span></div>
+    <div class="bd"><div id="cPie" class="chart h420"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>明细排名</h3><span class="sub" id="tblSub"></span></div>
+  <div class="bd">
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th class="num">排名</th><th>名称</th><th>所属类别</th><th>传染病</th>
+          <th class="num">就诊人次</th><th class="num">占比</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const periods = {{ periods | tojson }};
+let cBar, cPie, curPeriod = '全部';
+
+function periodOf() { return document.getElementById('period').value; }
+function dimOf() { return document.getElementById('dim').value; }
+
+async function load() {
+  const period = periodOf(), dim = dimOf();
+  curPeriod = period;
+  const d = await getJSON(`/api/disease?period=${encodeURIComponent(period)}&dim_type=${encodeURIComponent(dim)}`);
+  const list = d.list;
+  const total = list.reduce((s, x) => s + Number(x.visit_cnt), 0);
+  document.getElementById('sumBadge').textContent = `共 ${list.length} 项，合计 ${fmt(total)} 人次`;
+  document.getElementById('tblSub').textContent = `维度：${dim} · 周期：${period}`;
+
+  const top = list.slice(0, 15).reverse();
+  cBar.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: dim === '疾病' ? 150 : 118, right: 70, top: 16, bottom: 16 },
+    xAxis: { type: 'value', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top.map(x => x.disease_name), axisLabel: axisLabel() },
+    series: [{
+      type: 'bar', barMaxWidth: 16,
+      data: top.map((x, i) => ({
+        value: x.visit_cnt,
+        itemStyle: { color: x.is_infectious == 1 ? '#e8833a' : PALETTE[(top.length - 1 - i) % PALETTE.length], borderRadius: [0, 4, 4, 0] }
+      })),
+      label: {
+        show: true, position: 'right', fontSize: 11, color: '#6b7280',
+        formatter: p => fmt(p.value) + '  ' + (p.value * 100 / total).toFixed(2) + '%'
+      }
+    }]
+  });
+
+  const head = list.slice(0, 12);
+  const rest = list.slice(12);
+  const pieData = head.map(x => ({ name: x.disease_name, value: Number(x.visit_cnt) }));
+  if (rest.length) pieData.push({ name: '其他 ' + rest.length + ' 项', value: rest.reduce((s, x) => s + Number(x.visit_cnt), 0) });
+  cPie.setOption({
+    tooltip: { trigger: 'item', formatter: p => `${p.name}<br/>${fmt(p.value)} 人次 (${p.percent}%)` },
+    legend: { type: 'scroll', orient: 'vertical', right: 6, top: 20, bottom: 20, textStyle: axisLabel(), itemWidth: 10, itemHeight: 10 },
+    series: [{
+      type: 'pie', radius: ['42%', '70%'], center: ['38%', '52%'],
+      data: pieData, itemStyle: { borderColor: '#fff', borderWidth: 2 },
+      label: { formatter: '{b}\n{d}%', fontSize: 11, color: '#374151' },
+      labelLine: { length: 8, length2: 8 },
+      color: PALETTE
+    }]
+  });
+
+  document.getElementById('tbody').innerHTML = list.map(x => `
+    <tr>
+      <td class="num">${x.rank_no}</td>
+      <td>${x.disease_name}</td>
+      <td>${x.disease_category || '-'}</td>
+      <td>${x.is_infectious == 1 ? '<span class="badge orange">法定传染病</span>' : '<span style="color:#9ca3af">—</span>'}</td>
+      <td class="num">${fmt(x.visit_cnt)}</td>
+      <td class="num">${x.visit_ratio}%</td>
+    </tr>`).join('');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  cBar = initChart('cBar'); cPie = initChart('cPie');
+  periodSelect('period', periods, load);
+  document.getElementById('dim').addEventListener('change', load);
+});
+</script>
+{% endblock %}

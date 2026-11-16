@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}报表导出{% endblock %}
+{% block pagetitle %}报表导出{% endblock %}
+{% block pagesub %}将 ADS 应用层结果导出为 Excel / CSV{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <label>统计周期</label>
+  <select id="period" class="filter"></select>
+  <span class="badge">当前角色：管理员，可导出全量报表</span>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>可导出报表清单</h3><span class="sub">数据源：MySQL 库 med_health 的 ADS 结果表</span></div>
+  <div class="bd">
+    <table class="tbl">
+      <thead><tr>
+        <th>报表名称</th><th>源表</th><th>说明</th><th class="num">当前周期行数</th><th>操作</th>
+      </tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="notice">
+  <b>导出说明：</b>导出的 Excel 每张报表一个工作表，字段与 ADS 层结果表一致，可直接用于报告附表；
+  CSV 使用 UTF-8 with BOM 编码，Excel 打开不乱码。集群环境下这一步对应
+  <code>sqoop export</code> 将 Hive ADS 表导出到 MySQL 后，再经本页面向业务人员分发。
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const REPORTS = [
+  { key: 'overview',   name: '总体概览 KPI 指标',   table: 'ads_overview_kpi',        desc: '全周期与逐月核心指标（挂号量、就诊量、住院、平均住院日、费用等）' },
+  { key: 'disease',    name: '疾病分布统计',        table: 'ads_disease_distribution', desc: '按疾病大类与具体病种的就诊人次与占比' },
+  { key: 'peak',       name: '就诊高峰分布',        table: 'ads_visit_peak',           desc: '按时段 / 星期 / 月份的就诊人次分布' },
+  { key: 'dept',       name: '科室工作量统计',      table: 'ads_dept_workload',        desc: '各科室挂号量、就诊量、住院人次、收入与工作量指数' },
+  { key: 'drug',       name: '药品消耗统计',        table: 'ads_drug_consumption',     desc: '药品消耗数量、金额、开具次数与占比排名' },
+  { key: 'los',        name: '住院天数分析',        table: 'ads_los_analysis',         desc: '按科室 / 天数区间 / 疾病类别的平均住院日、费用与转归' },
+  { key: 'infectious', name: '法定传染病监测',      table: 'ads_infectious_monitor',   desc: '法定报告传染病病种报告例数与占比' },
+];
+const periods = {{ periods | tojson }};
+let cur = '全部';
+
+function render() {
+  document.getElementById('tbody').innerHTML = REPORTS.map(r => `
+    <tr>
+      <td><b>${r.name}</b></td>
+      <td class="mono">${r.table}</td>
+      <td style="color:#4b5563">${r.desc}</td>
+      <td class="num" id="cnt_${r.key}">—</td>
+      <td>
+        <a class="btn sm primary" href="/export/${r.key}?period=${encodeURIComponent(cur)}">导出 Excel</a>
+        <a class="btn sm" href="/export/detail/${r.key}?period=${encodeURIComponent(cur)}">导出 CSV</a>
+      </td>
+    </tr>`).join('');
+  loadCounts();
+}
+
+async function loadCounts() {
+  const res = await fetch('/api/export_counts?period=' + encodeURIComponent(cur)).then(r => r.json()).catch(() => null);
+  if (!res || !res.ok) return;
+  Object.entries(res.data).forEach(([k, v]) => {
+    const el = document.getElementById('cnt_' + k);
+    if (el) el.textContent = Number(v).toLocaleString('zh-CN');
+  });
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  periodSelect('period', periods, p => { cur = p; render(); });
+});
+</script>
+{% endblock %}

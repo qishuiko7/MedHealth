@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}平台说明{% endblock %}
+{% block pagetitle %}平台说明{% endblock %}
+{% block pagesub %}系统架构 · 技术栈 · 数据流程 · 数据字典{% endblock %}
+
+{% block content %}
+<div class="grid g3">
+  <div class="card">
+    <div class="hd"><h3>系统定位</h3></div>
+    <div class="bd" style="font-size:13px;line-height:2;color:#4b5563">
+      面向区域医疗机构的<b>医疗健康数据平台</b>，围绕电子病历、挂号、药品、住院等业务数据，
+      完成<b>脱敏 → 采集 → 入湖 → 数仓分层 → 离线/实时统计 → 可视化展示</b>的全链路建设，
+      支撑疾病分布、就诊高峰、科室工作量、药品消耗、住院天数与传染病监测等分析主题。
+    </div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>统一技术栈</h3></div>
+    <div class="bd" style="font-size:13px;line-height:2;color:#4b5563">
+      基础环境：JDK 8/11、Hadoop 3.x、ZooKeeper 3.x<br>
+      数据采集：Python 模拟数据生成、Requests/Scrapy 爬虫、Flume/Sqoop（可选）<br>
+      消息缓冲：Kafka<br>
+      数据存储：HDFS、Hive、MySQL<br>
+      离线计算：Spark、Spark SQL、PySpark<br>
+      实时计算：Spark Streaming<br>
+      机器学习：Spark MLlib（扩展）<br>
+      后端开发：Flask、PyMySQL<br>
+      前端展示：Bootstrap、ECharts
+    </div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>数仓分层</h3></div>
+    <div class="bd" style="font-size:13px;line-height:2;color:#4b5563">
+      <b>ODS</b> 贴源层：9 张表，与 HDFS 落地文件一一对应，含脱敏快照<br>
+      <b>DWD</b> 明细层：挂号 / 就诊 / 处方 / 住院 4 张明细表，维度退化 + 分区<br>
+      <b>DWS</b> 汇总层：6 张轻度汇总表（科室、时段、疾病、药品、住院、人群）<br>
+      <b>ADS</b> 应用层：7 张指标结果表，字段与前端接口一一对应<br>
+      存储格式：ORC + Snappy；分区键：业务日期 dt / 月份 stat_month
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>数据流程</h3><span class="sub">对应《项目操作流程》17 个步骤</span></div>
+  <div class="bd">
+    <div class="treecode">
+数据源（HIS 业务库 + 外部门户爬虫）
+   │
+   ▼
+[1] 数据生成 / 采集   ── code/data_generator/gen_source_data.py   20,000 患者 · 120,000 挂号 · 105,334 就诊 · 223,191 处方 · 14,000 住院
+   │
+   ▼
+[2] 数据脱敏         ── code/data_generator/desensitize.py         8 条字段级规则（掩码 / 哈希加盐 / 泛化 / 伪名化）
+   │
+   ▼
+[3] ODS 落盘 + 入湖   ── output/ods/*.csv  →  HDFS /med_health/ods/
+   │
+   ▼
+[4] Kafka 缓冲       ── 主题 med_registration / med_visit / med_prescription
+   │
+   ├─────────────► 离线链路 ──────────────────────────────┐
+   │                Hive ODS → DWD → DWS → ADS            │
+   │                （Spark SQL / PySpark 离线统计）        │
+   │                                                       ▼
+   └─────────────► 实时链路 ── Spark Streaming 60s 窗口 ── MySQL（rt_visit_stat / rt_kpi）
+                                                            │
+                                            ADS 结果回传 ──►┤
+                                                            ▼
+                                              MySQL 库 med_health（ADS 7 张结果表）
+                                                            │
+                                                            ▼
+                                        Flask + Bootstrap + ECharts 可视化平台（11 个页面）
+                                                            │
+                                                            ▼
+                                                    报表导出 Excel / CSV
+    </div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>ODS 贴源数据规模</h3></div>
+    <div class="bd">
+      <table class="tbl">
+        <thead><tr><th>数据表</th><th class="num">记录数</th><th>说明</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">ods_department</td><td class="num">20</td><td>科室维度</td></tr>
+          <tr><td class="mono">ods_doctor</td><td class="num">300</td><td>医生维度（已脱敏）</td></tr>
+          <tr><td class="mono">ods_drug</td><td class="num">200</td><td>药品维度</td></tr>
+          <tr><td class="mono">ods_disease</td><td class="num">122</td><td>疾病字典（ICD-10）</td></tr>
+          <tr><td class="mono">ods_patient</td><td class="num">20,000</td><td>患者主索引（已脱敏）</td></tr>
+          <tr><td class="mono">ods_registration</td><td class="num">120,000</td><td>挂号事实表</td></tr>
+          <tr><td class="mono">ods_visit</td><td class="num">105,334</td><td>门诊就诊与诊断</td></tr>
+          <tr><td class="mono">ods_prescription</td><td class="num">223,191</td><td>处方明细</td></tr>
+          <tr><td class="mono">ods_admission</td><td class="num">14,000</td><td>住院记录</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>ADS 应用层结果表</h3></div>
+    <div class="bd">
+      <table class="tbl">
+        <thead><tr><th>结果表</th><th>支撑页面</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">ads_overview_kpi</td><td>综合概览大屏 / 报表导出</td></tr>
+          <tr><td class="mono">ads_disease_distribution</td><td>疾病分布分析</td></tr>
+          <tr><td class="mono">ads_visit_peak</td><td>就诊高峰分析</td></tr>
+          <tr><td class="mono">ads_dept_workload</td><td>科室工作量分析</td></tr>
+          <tr><td class="mono">ads_drug_consumption</td><td>药品消耗分析</td></tr>
+          <tr><td class="mono">ads_los_analysis</td><td>住院天数分析</td></tr>
+          <tr><td class="mono">ads_infectious_monitor</td><td>法定传染病监测</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>平台功能与权限</h3></div>
+  <div class="bd">
+    <table class="tbl">
+      <thead><tr><th>功能模块</th><th>说明</th><th>管理员</th><th>医师</th><th>访客</th></tr></thead>
+      <tbody>
+        <tr><td>综合概览大屏</td><td>核心 KPI 与全维度趋势</td><td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><td>疾病分布分析</td><td>疾病大类与单病种排名</td><td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><td>就诊高峰分析</td><td>时段 / 星期 / 月度分布</td><td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><td>科室工作量分析</td><td>工作量指数与收入贡献</td><td>✓</td><td>✓</td><td>—</td></tr>
+        <tr><td>药品消耗分析</td><td>金额榜 / 数量榜 / 类别结构</td><td>✓</td><td>✓</td><td>—</td></tr>
+        <tr><td>住院天数分析</td><td>平均住院日与费用转归</td><td>✓</td><td>✓</td><td>—</td></tr>
+        <tr><td>法定传染病监测</td><td>病种构成与月度趋势</td><td>✓</td><td>✓</td><td>—</td></tr>
+        <tr><td>数据脱敏规则</td><td>脱敏方案与前后对照</td><td>✓</td><td>✓</td><td>✓</td></tr>
+        <tr><td>实时数据监控</td><td>Kafka + Spark Streaming 窗口指标</td><td>✓</td><td>✓</td><td>—</td></tr>
+        <tr><td>报表导出</td><td>ADS 结果导出 Excel / CSV</td><td>✓</td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

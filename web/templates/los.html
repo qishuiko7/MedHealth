@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}住院天数分析{% endblock %}
+{% block pagetitle %}住院天数分析{% endblock %}
+{% block pagesub %}平均住院日 · 住院天数分布 · 费用与转归{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <label>统计周期</label>
+  <select id="period" class="filter"></select>
+  <label>分析维度</label>
+  <select id="dim" class="filter">
+    <option value="科室">按科室</option>
+    <option value="天数区间">按住院天数区间</option>
+    <option value="疾病类别">按疾病类别</option>
+  </select>
+  <span class="badge" id="sumBadge"></span>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>平均住院日对比</h3><span class="sub">单位：天，虚线为整体均值</span></div>
+    <div class="bd"><div id="cLos" class="chart h400"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>住院人次与次均费用</h3><span class="sub">柱状为住院人次，折线为次均费用</span></div>
+    <div class="bd"><div id="cCost" class="chart h400"></div></div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>住院天数区间分布</h3><span class="sub">住院日集中度分析</span></div>
+    <div class="bd"><div id="cRange" class="chart h320"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>治愈好转率</h3><span class="sub">治愈 + 好转 / 出院人次</span></div>
+    <div class="bd"><div id="cCure" class="chart h320"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>住院指标明细</h3><span class="sub" id="tblSub"></span></div>
+  <div class="bd">
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th class="num">排名</th><th>维度值</th><th class="num">住院人次</th>
+          <th class="num">平均住院日(天)</th><th class="num">最长(天)</th><th class="num">最短(天)</th>
+          <th class="num">次均费用(元)</th><th class="num">费用合计(元)</th><th class="num">治愈好转率</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const periods = {{ periods | tojson }};
+let cLos, cCost, cRange, cCure, curPeriod = '全部', curDim = '科室';
+let curList = [], rangeList = [];
+
+async function load(period, dim) {
+  curPeriod = period; curDim = dim;
+  curList = await getJSON(`/api/los?period=${encodeURIComponent(period)}&dim_type=${encodeURIComponent(dim)}`);
+  rangeList = await getJSON(`/api/los?period=${encodeURIComponent(period)}&dim_type=${encodeURIComponent('天数区间')}`);
+  render();
+}
+
+function render() {
+  const list = curList;
+  const adm = list.reduce((s, x) => s + Number(x.admission_cnt), 0);
+  const losSum = list.reduce((s, x) => s + Number(x.avg_los) * Number(x.admission_cnt), 0);
+  const avg = adm ? losSum / adm : 0;
+  document.getElementById('sumBadge').textContent =
+    `维度：${curDim} · 住院 ${fmt(adm)} 人次 · 平均住院日 ${avg.toFixed(2)} 天`;
+  document.getElementById('tblSub').textContent = `周期：${curPeriod} · 维度：${curDim}`;
+
+  const top = list.slice(0, 16).reverse();
+  cLos.setOption({
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => {
+        const d = list.find(x => x.dim_value === ps[0].axisValue) || {};
+        return `<b>${ps[0].axisValue}</b><br/>平均住院日：<b>${d.avg_los}</b> 天<br/>住院人次：${fmt(d.admission_cnt)}<br/>次均费用：${fmt(d.avg_cost, 2)} 元`;
+      }
+    },
+    grid: { left: 110, right: 40, top: 24, bottom: 24 },
+    xAxis: { type: 'value', name: '天', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top.map(x => x.dim_value), axisLabel: axisLabel() },
+    series: [{
+      type: 'bar', barMaxWidth: 17,
+      data: top.map(x => ({ value: Number(x.avg_los), itemStyle: { color: Number(x.avg_los) > avg ? '#e8833a' : '#1f6feb', borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', fontSize: 11, color: '#6b7280', formatter: p => p.value + ' 天' },
+      markLine: { silent: true, symbol: 'none', lineStyle: { type: 'dashed', color: '#e8833a' },
+                  data: [{ xAxis: Number(avg.toFixed(2)), label: { formatter: '均值 ' + avg.toFixed(2), fontSize: 11 } }] }
+    }]
+  });
+
+  cCost.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['住院人次', '次均费用'], top: 4, textStyle: axisLabel() },
+    grid: { left: 62, right: 76, top: 40, bottom: 62 },
+    xAxis: { type: 'category', data: top.map(x => x.dim_value), axisLabel: { ...axisLabel(), rotate: 40 } },
+    yAxis: [{ type: 'value', name: '人次', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+            { type: 'value', name: '元', axisLabel: { ...axisLabel(), formatter: v => fmtWan(v, 0) }, splitLine: { show: false } }],
+    series: [
+      { name: '住院人次', type: 'bar', data: top.map(x => x.admission_cnt), barMaxWidth: 24, itemStyle: { color: '#1f6feb', borderRadius: [4, 4, 0, 0] } },
+      { name: '次均费用', type: 'line', yAxisIndex: 1, smooth: true, data: top.map(x => x.avg_cost), itemStyle: { color: '#e8833a' }, lineStyle: { width: 2.4 } }
+    ]
+  });
+
+  const order = ['1-3天', '4-7天', '8-14天', '15-30天', '30天以上'];
+  const rl = rangeList.slice().sort((a, b) => order.indexOf(a.dim_value) - order.indexOf(b.dim_value));
+  const rtotal = rl.reduce((s, x) => s + Number(x.admission_cnt), 0);
+  cRange.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => { const d = rl.find(x => x.dim_value === ps[0].axisValue) || {}; 
+        return `<b>${ps[0].axisValue}</b><br/>住院人次：<b>${fmt(d.admission_cnt)}</b>（${(d.admission_cnt * 100 / rtotal).toFixed(2)}%）<br/>平均住院日：${d.avg_los} 天`; } },
+    grid: baseGrid(),
+    xAxis: { type: 'category', data: rl.map(x => x.dim_value), axisLabel: axisLabel() },
+    yAxis: { type: 'value', name: '人次', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{
+      type: 'bar', barMaxWidth: 46,
+      data: rl.map((x, i) => ({ value: x.admission_cnt, itemStyle: { color: PALETTE[i % PALETTE.length], borderRadius: [4, 4, 0, 0] } })),
+      label: { show: true, position: 'top', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) + '\n' + (p.value * 100 / rtotal).toFixed(1) + '%' }
+    }]
+  });
+
+  cCure.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => { const d = top.find(x => x.dim_value === ps[0].axisValue) || {};
+        return `<b>${ps[0].axisValue}</b><br/>治愈好转率：<b>${d.cure_rate}%</b><br/>住院人次：${fmt(d.admission_cnt)}`; } },
+    grid: { left: 110, right: 50, top: 20, bottom: 24 },
+    xAxis: { type: 'value', max: 100, name: '%', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top.map(x => x.dim_value), axisLabel: axisLabel() },
+    series: [{
+      type: 'bar', barMaxWidth: 15,
+      data: top.map(x => ({ value: Number(x.cure_rate), itemStyle: { color: Number(x.cure_rate) >= 85 ? '#2f9e6e' : '#e8833a', borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', fontSize: 11, color: '#6b7280', formatter: p => p.value + '%' }
+    }]
+  });
+
+  document.getElementById('tbody').innerHTML = list.map((x, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td>${x.dim_value}</td>
+      <td class="num">${fmt(x.admission_cnt)}</td>
+      <td class="num"><b>${x.avg_los}</b></td>
+      <td class="num">${x.los_max}</td>
+      <td class="num">${x.los_min}</td>
+      <td class="num">${fmt(x.avg_cost, 2)}</td>
+      <td class="num">${fmt(x.total_cost, 2)}</td>
+      <td class="num">${x.cure_rate}%</td>
+    </tr>`).join('');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  cLos = initChart('cLos'); cCost = initChart('cCost'); cRange = initChart('cRange'); cCure = initChart('cCure');
+  let p = '全部', dm = '科室';
+  periodSelect('period', periods, v => { p = v; load(p, dm); });
+  document.getElementById('dim').addEventListener('change', e => { dm = e.target.value; load(p, dm); });
+});
+</script>
+{% endblock %}

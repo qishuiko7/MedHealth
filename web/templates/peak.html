@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}就诊高峰分析{% endblock %}
+{% block pagetitle %}就诊高峰分析{% endblock %}
+{% block pagesub %}24 小时时段 · 星期效应 · 月度趋势{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <label>统计周期</label>
+  <select id="period" class="filter"></select>
+  <span class="badge" id="peakBadge"></span>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>24 小时就诊时段分布</h3><span class="sub">用于门诊排班与号源投放</span></div>
+    <div class="bd"><div id="cHour" class="chart h360"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>时段就诊占比</h3><span class="sub">上午 / 下午 / 夜间</span></div>
+    <div class="bd"><div id="cPeriod" class="chart h360"></div></div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>星期就诊分布</h3><span class="sub">周末就诊量明显低于工作日</span></div>
+    <div class="bd"><div id="cWeek" class="chart h320"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>月度就诊趋势</h3><span class="sub">体现季节性疾病波动</span></div>
+    <div class="bd"><div id="cMonth" class="chart h320"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>时段明细</h3></div>
+  <div class="bd">
+    <div class="scroll" style="max-height:300px">
+      <table class="tbl">
+        <thead><tr><th class="num">时间</th><th class="num">就诊人次</th><th class="num">占比</th><th>强度</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const periods = {{ periods | tojson }};
+let cHour, cPeriod, cWeek, cMonth;
+
+function barColor(i, arr) { return PALETTE[i % PALETTE.length]; }
+
+async function load(period) {
+  const d = await getJSON('/api/peak?period=' + encodeURIComponent(period));
+  const hour = (d['时段'] || []).slice().sort((a, b) => a.sort_key - b.sort_key);
+  const total = hour.reduce((s, x) => s + Number(x.visit_cnt), 0);
+  const peak = hour.reduce((a, b) => Number(a.visit_cnt) > Number(b.visit_cnt) ? a : b, hour[0] || {});
+  document.getElementById('peakBadge').textContent = peak.time_value
+    ? `就诊高峰时段：${peak.time_value}（${fmt(peak.visit_cnt)} 人次，占 ${(peak.visit_cnt * 100 / total).toFixed(2)}%）` : '';
+
+  cHour.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: baseGrid(),
+    xAxis: { type: 'category', data: hour.map(x => x.time_value), axisLabel: { ...axisLabel(), interval: 1 } },
+    yAxis: { type: 'value', name: '人次', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{
+      type: 'line', smooth: true, symbolSize: 6,
+      data: hour.map(x => ({ value: x.visit_cnt, itemStyle: { color: Number(x.visit_cnt) >= Number(peak.visit_cnt) * 0.8 ? '#e8833a' : '#1f6feb' } })),
+      lineStyle: { width: 2.6, color: '#1f6feb' },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(31,111,235,.32)' }, { offset: 1, color: 'rgba(31,111,235,.02)' }]) },
+      markLine: { silent: true, symbol: 'none', lineStyle: { type: 'dashed', color: '#e8833a' }, data: [{ type: 'average', name: '均值' }] }
+    }]
+  });
+
+  const seg = { '上午（06-11 时）': 0, '下午（12-17 时）': 0, '夜间（18-05 时）': 0 };
+  hour.forEach(x => {
+    const h = x.sort_key;
+    if (h >= 6 && h <= 11) seg['上午（06-11 时）'] += Number(x.visit_cnt);
+    else if (h >= 12 && h <= 17) seg['下午（12-17 时）'] += Number(x.visit_cnt);
+    else seg['夜间（18-05 时）'] += Number(x.visit_cnt);
+  });
+  cPeriod.setOption({
+    tooltip: { trigger: 'item', formatter: p => `${p.name}<br/>${fmt(p.value)} 人次 (${p.percent}%)` },
+    legend: { bottom: 0, textStyle: axisLabel() },
+    series: [{
+      type: 'pie', radius: ['46%', '72%'], center: ['50%', '46%'],
+      data: Object.entries(seg).map(([k, v]) => ({ name: k, value: v })),
+      itemStyle: { borderColor: '#fff', borderWidth: 3 },
+      label: { formatter: '{b}\n{d}%', fontSize: 12, color: '#374151' },
+      color: ['#1f6feb', '#2f9e6e', '#6b7280']
+    }]
+  });
+
+  const wk = (d['星期'] || []).slice().sort((a, b) => a.sort_key - b.sort_key);
+  cWeek.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: baseGrid(),
+    xAxis: { type: 'category', data: wk.map(x => x.time_value), axisLabel: axisLabel() },
+    yAxis: { type: 'value', name: '人次', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{
+      type: 'bar', barMaxWidth: 38,
+      data: wk.map(x => ({ value: x.visit_cnt, itemStyle: { color: x.sort_key >= 6 ? '#e8833a' : '#1f6feb', borderRadius: [4, 4, 0, 0] } })),
+      label: { show: true, position: 'top', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) }
+    }]
+  });
+
+  const mo = (d['月份'] || []).slice().sort((a, b) => String(a.time_value).localeCompare(String(b.time_value)));
+  cMonth.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: 55, right: 24, top: 30, bottom: 56 },
+    xAxis: { type: 'category', data: mo.map(x => x.time_value), axisLabel: { ...axisLabel(), rotate: 45 } },
+    yAxis: { type: 'value', name: '人次', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{
+      type: 'bar', barMaxWidth: 22,
+      data: mo.map((x, i) => ({ value: x.visit_cnt, itemStyle: { color: PALETTE[i % PALETTE.length], borderRadius: [4, 4, 0, 0] } }))
+    }]
+  });
+
+  document.getElementById('tbody').innerHTML = hour.map(x => {
+    const r = Number(x.visit_cnt) * 100 / total;
+    const w = Math.min(100, r * 8);
+    return `<tr>
+      <td class="num">${x.time_value}</td>
+      <td class="num">${fmt(x.visit_cnt)}</td>
+      <td class="num">${r.toFixed(2)}%</td>
+      <td><div style="background:#e8f1ff;border-radius:4px;height:9px;width:180px">
+        <div style="background:#1f6feb;height:9px;border-radius:4px;width:${w}%"></div></div></td>
+    </tr>`;
+  }).join('');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  cHour = initChart('cHour'); cPeriod = initChart('cPeriod');
+  cWeek = initChart('cWeek'); cMonth = initChart('cMonth');
+  periodSelect('period', periods, load);
+});
+</script>
+{% endblock %}

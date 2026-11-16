@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}传染病监测{% endblock %}
+{% block pagetitle %}法定传染病监测{% endblock %}
+{% block pagesub %}法定报告传染病病种构成 · 月度趋势 · 报告占比{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <label>统计周期</label>
+  <select id="period" class="filter"></select>
+  <span class="badge" id="sumBadge"></span>
+</div>
+
+<div class="notice warn" style="margin-bottom:16px">
+  <b>口径说明：</b>本模块统计的是《中华人民共和国传染病防治法》规定的法定报告传染病（甲类 / 乙类 / 丙类）就诊人次，
+  不含普通感染性疾病的全部病种。传染病标识在数据生成阶段写入疾病字典 <code>dim_disease.is_infectious</code>，
+  在 DWD 层随诊断维度退化到就诊明细，ADS 层按病种与月份汇总。
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>传染病病种构成</h3><span class="sub">报告例数与占比</span></div>
+    <div class="bd"><div id="cBar" class="chart h380"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>报告例数占比</h3><span class="sub">各病种构成比</span></div>
+    <div class="bd"><div id="cPie" class="chart h380"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>月度报告例数趋势</h3><span class="sub">全周期 2025-01 ~ 2026-09</span></div>
+  <div class="bd"><div id="cTrend" class="chart h320"></div></div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>病种明细</h3><span class="sub" id="tblSub"></span></div>
+  <div class="bd">
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th class="num">排名</th><th>ICD-10</th><th>病种名称</th><th>所属类别</th>
+          <th class="num">报告例数</th><th class="num">占比</th><th>强度</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const periods = {{ periods | tojson }};
+let cBar, cPie, cTrend;
+
+async function load(period) {
+  const d = await getJSON('/api/infectious?period=' + encodeURIComponent(period));
+  const list = d.list;
+  const total = list.reduce((s, x) => s + Number(x.case_cnt), 0);
+  document.getElementById('sumBadge').textContent = `病种 ${list.length} 个，报告合计 ${fmt(total)} 例`;
+  document.getElementById('tblSub').textContent = `周期：${period}`;
+
+  const top = list.slice(0, 15).reverse();
+  cBar.setOption({
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => {
+        const d0 = list.find(x => x.diagnosis_name === ps[0].axisValue) || {};
+        return `<b>${ps[0].axisValue}</b>（${d0.diagnosis_code || '-'}）<br/>报告例数：<b>${fmt(d0.case_cnt)}</b><br/>占比：${d0.case_ratio}%<br/>类别：${d0.disease_category || '-'}`;
+      }
+    },
+    grid: { left: 140, right: 76, top: 16, bottom: 16 },
+    xAxis: { type: 'value', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top.map(x => x.diagnosis_name), axisLabel: axisLabel() },
+    series: [{
+      type: 'bar', barMaxWidth: 16,
+      data: top.map(x => ({ value: x.case_cnt, itemStyle: { color: '#e8833a', borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) }
+    }]
+  });
+
+  cPie.setOption({
+    tooltip: { trigger: 'item', formatter: p => `${p.name}<br/>${fmt(p.value)} 例 (${p.percent}%)` },
+    legend: { type: 'scroll', orient: 'vertical', right: 4, top: 20, bottom: 20, textStyle: axisLabel(), itemWidth: 10, itemHeight: 10 },
+    series: [{
+      type: 'pie', radius: ['40%', '68%'], center: ['36%', '52%'],
+      data: list.slice(0, 12).map(x => ({ name: x.diagnosis_name, value: Number(x.case_cnt) })),
+      itemStyle: { borderColor: '#fff', borderWidth: 2 },
+      label: { formatter: '{b}\n{d}%', fontSize: 11, color: '#374151' },
+      labelLine: { length: 6, length2: 8 },
+      color: PALETTE
+    }]
+  });
+
+  const bm = (d.by_month || []).slice().sort((a, b) => String(a.stat_period).localeCompare(String(b.stat_period)));
+  cTrend.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: 62, right: 24, top: 20, bottom: 50 },
+    xAxis: { type: 'category', data: bm.map(x => x.stat_period), axisLabel: { ...axisLabel(), rotate: 45 } },
+    yAxis: { type: 'value', name: '例数', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{
+      type: 'line', smooth: true, symbolSize: 7, data: bm.map(x => x.case_cnt),
+      itemStyle: { color: '#e8833a' }, lineStyle: { width: 2.6 },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(232,131,58,.3)' }, { offset: 1, color: 'rgba(232,131,58,.02)' }]) }
+    }]
+  });
+
+  document.getElementById('tbody').innerHTML = list.map(x => {
+    const w = Math.min(100, Number(x.case_ratio) * 2.6);
+    return `<tr>
+      <td class="num">${x.rank_no}</td>
+      <td class="mono">${x.diagnosis_code || '-'}</td>
+      <td>${x.diagnosis_name}</td>
+      <td>${x.disease_category || '-'}</td>
+      <td class="num">${fmt(x.case_cnt)}</td>
+      <td class="num">${x.case_ratio}%</td>
+      <td><div style="background:#fdf1e6;border-radius:4px;height:9px;width:160px">
+        <div style="background:#e8833a;height:9px;border-radius:4px;width:${w}%"></div></div></td>
+    </tr>`;
+  }).join('');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  cBar = initChart('cBar'); cPie = initChart('cPie'); cTrend = initChart('cTrend');
+  periodSelect('period', periods, load);
+});
+</script>
+{% endblock %}

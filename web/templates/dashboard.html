@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}综合概览大屏{% endblock %}
+{% block pagetitle %}综合概览大屏{% endblock %}
+{% block pagesub %}核心 KPI 与全维度趋势一览{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <label>统计周期</label>
+  <select id="period" class="filter"></select>
+  <span class="badge" id="updateTime"></span>
+  <a class="btn sm" href="{{ url_for('disease') }}">疾病分布 →</a>
+  <a class="btn sm" href="{{ url_for('peak') }}">就诊高峰 →</a>
+</div>
+
+<div class="grid g4" id="kpiRow1" style="margin-bottom:6px"></div>
+<div class="grid g4" id="kpiRow2" style="margin-bottom:16px"></div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>月度就诊人次与住院人次趋势</h3><span class="sub">2025-01 ~ 2026-09</span></div>
+    <div class="bd"><div id="cTrend" class="chart h320"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>24 小时就诊高峰分布</h3><span class="sub">按时段统计门诊就诊人次</span></div>
+    <div class="bd"><div id="cHour" class="chart h320"></div></div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>疾病类别分布 TOP10</h3><span class="sub">按疾病大类统计就诊人次</span></div>
+    <div class="bd"><div id="cCat" class="chart h360"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>单病种就诊量 TOP10</h3><span class="sub">ICD-10 具体诊断</span></div>
+    <div class="bd"><div id="cDis" class="chart h360"></div></div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>就诊星期分布</h3><span class="sub">周一至周日就诊人次</span></div>
+    <div class="bd"><div id="cWeek" class="chart h280"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>平均住院日趋势</h3><span class="sub">单位：天</span></div>
+    <div class="bd"><div id="cLos" class="chart h280"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>数据口径说明</h3></div>
+  <div class="bd">
+    <div class="notice">
+      · <b>挂号总量</b>：统计期内全部挂号记录（含取消、爽约）；<b>有效就诊挂号量</b>：状态为「已就诊」的挂号。<br>
+      · <b>门诊就诊人次</b>：产生诊断记录的挂号人次；<b>住院人次</b>：住院记录数；<b>平均住院日</b> = 住院天数合计 / 住院人次。<br>
+      · <b>处方总金额</b>为门诊处方明细金额合计（未含住院费用）；<b>次均药品费用</b> = 处方总金额 / 门诊就诊人次。<br>
+      · <b>法定传染病占比</b> = 法定传染病就诊人次 / 门诊就诊人次，传染病标识依据《中华人民共和国传染病防治法》法定报告病种口径。
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const periods = {{ periods | tojson }};
+let chTrend, chHour, chCat, chDis, chWeek, chLos;
+
+function kpiCard(label, value, unit, foot, cls) {
+  return `<div class="kpi ${cls || ''}">
+    <div class="label">${label}</div>
+    <div class="value ${String(value).length > 9 ? 'small' : ''}">${value}<span class="unit">${unit || ''}</span></div>
+    <div class="foot">${foot || ''}</div>
+  </div>`;
+}
+
+async function loadOverview(period) {
+  const d = await getJSON('/api/overview?period=' + encodeURIComponent(period));
+  const k = d.kpi;
+  document.getElementById('updateTime').textContent = '数据更新：' + (k.update_time || '').replace('T', ' ');
+  document.getElementById('kpiRow1').innerHTML =
+    kpiCard('挂号总量', fmt(k.reg_cnt), '人次', '有效就诊 ' + fmt(k.visited_cnt) + ' 人次', '') +
+    kpiCard('门诊就诊人次', fmt(k.visit_cnt), '人次', '挂号就诊转化率 ' + k.visit_rate + '%', 'accent') +
+    kpiCard('住院人次', fmt(k.admission_cnt), '人次', '住院总费用 ' + fmtWan(k.admission_cost) + ' 元', '') +
+    kpiCard('平均住院日', k.avg_los_days, '天', '住院天数合计 / 住院人次', 'warn');
+  document.getElementById('kpiRow2').innerHTML =
+    kpiCard('处方总金额', fmtWan(k.presc_amount), '元', '药品消耗 ' + fmtWan(k.drug_qty) + ' 单位', '') +
+    kpiCard('次均药品费用', k.avg_visit_drug_fee, '元', '次均挂号费 ' + k.avg_reg_fee + ' 元', '') +
+    kpiCard('法定传染病报告', fmt(k.infectious_cnt), '例', '占就诊人次 ' + k.infectious_rate + '%', 'danger') +
+    kpiCard('就诊患者人数', fmt(k.patient_cnt), '人', '覆盖科室 ' + k.dept_cnt + ' 个', 'accent');
+
+  const m = d.trend.map(x => x.stat_period);
+  chTrend.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['门诊就诊人次', '住院人次'], top: 6, textStyle: axisLabel() },
+    grid: baseGrid(),
+    xAxis: { type: 'category', data: m, axisLabel: { ...axisLabel(), rotate: 45 } },
+    yAxis: [{ type: 'value', name: '就诊人次', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+            { type: 'value', name: '住院人次', axisLabel: axisLabel(), splitLine: { show: false } }],
+    series: [
+      { name: '门诊就诊人次', type: 'bar', data: d.trend.map(x => x.visit_cnt), itemStyle: { color: '#1f6feb', borderRadius: [3, 3, 0, 0] }, barMaxWidth: 20 },
+      { name: '住院人次', type: 'line', yAxisIndex: 1, smooth: true, data: d.trend.map(x => x.admission_cnt), itemStyle: { color: '#e8833a' }, lineStyle: { width: 2.5 } }
+    ]
+  });
+  chLos.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: baseGrid(),
+    xAxis: { type: 'category', data: m, axisLabel: { ...axisLabel(), rotate: 45 } },
+    yAxis: { type: 'value', name: '天', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{ name: '平均住院日', type: 'line', smooth: true, data: d.trend.map(x => x.avg_los_days), areaStyle: { color: 'rgba(47,158,110,.18)' }, itemStyle: { color: '#2f9e6e' }, lineStyle: { width: 2.5 } }]
+  });
+}
+
+async function loadDisease(period) {
+  const d = await getJSON('/api/disease?period=' + encodeURIComponent(period) + '&dim_type=类别');
+  const top = d.list.slice(0, 10).reverse();
+  chCat.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: 110, right: 46, top: 16, bottom: 16 },
+    xAxis: { type: 'value', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top.map(x => x.disease_name), axisLabel: axisLabel() },
+    series: [{
+      type: 'bar', data: top.map(x => x.visit_cnt), barMaxWidth: 15,
+      itemStyle: { borderRadius: [0, 4, 4, 0], color: p => PALETTE[p.dataIndex % PALETTE.length] },
+      label: { show: true, position: 'right', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) }
+    }]
+  });
+  const d2 = await getJSON('/api/disease?period=' + encodeURIComponent(period) + '&dim_type=疾病');
+  const top2 = d2.list.slice(0, 10).reverse();
+  chDis.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: 130, right: 46, top: 16, bottom: 16 },
+    xAxis: { type: 'value', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top2.map(x => x.disease_name), axisLabel: axisLabel() },
+    series: [{
+      type: 'bar', data: top2.map(x => x.visit_cnt), barMaxWidth: 15,
+      itemStyle: { borderRadius: [0, 4, 4, 0], color: '#0ea5e9' },
+      label: { show: true, position: 'right', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) }
+    }]
+  });
+}
+
+async function loadPeak(period) {
+  const d = await getJSON('/api/peak?period=' + encodeURIComponent(period));
+  const hour = d['时段'] || [];
+  chHour.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: baseGrid(),
+    xAxis: { type: 'category', data: hour.map(x => x.time_value), axisLabel: axisLabel() },
+    yAxis: { type: 'value', name: '人次', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{
+      type: 'line', smooth: true, data: hour.map(x => x.visit_cnt), symbol: 'circle', symbolSize: 5,
+      itemStyle: { color: '#1f6feb' }, lineStyle: { width: 2.5 },
+      areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(31,111,235,.34)' }, { offset: 1, color: 'rgba(31,111,235,.02)' }]) }
+    }]
+  });
+  const wk = (d['星期'] || []).slice().sort((a, b) => a.sort_key - b.sort_key);
+  chWeek.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: baseGrid(),
+    xAxis: { type: 'category', data: wk.map(x => x.time_value), axisLabel: axisLabel() },
+    yAxis: { type: 'value', name: '人次', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{
+      type: 'bar', data: wk.map((x, i) => ({ value: x.visit_cnt, itemStyle: { color: x.sort_key >= 6 ? '#e8833a' : '#1f6feb' } })),
+      barMaxWidth: 34, itemStyle: { borderRadius: [4, 4, 0, 0] },
+      label: { show: true, position: 'top', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) }
+    }]
+  });
+}
+
+async function refresh(period) {
+  try { await Promise.all([loadOverview(period), loadDisease(period), loadPeak(period)]); }
+  catch (e) { alert(e.message); }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  chTrend = initChart('cTrend'); chHour = initChart('cHour'); chCat = initChart('cCat');
+  chDis = initChart('cDis'); chWeek = initChart('cWeek'); chLos = initChart('cLos');
+  periodSelect('period', periods, refresh);
+});
+</script>
+{% endblock %}

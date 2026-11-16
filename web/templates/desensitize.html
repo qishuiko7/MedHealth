@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}数据脱敏规则{% endblock %}
+{% block pagetitle %}数据脱敏规则说明{% endblock %}
+{% block pagesub %}电子病历 / 挂号 / 药品数据脱敏方案与前后对照{% endblock %}
+
+{% block content %}
+<div class="notice" style="margin-bottom:16px">
+  <b>设计原则：</b>
+  依据《个人信息保护法》《人口健康信息管理办法》与《信息安全技术 个人信息安全规范》(GB/T 35273)，
+  对直接标识符（姓名、身份证号、手机号、住址、邮箱、病历号）执行<b>最小必要 + 不可逆</b>脱敏；
+  同时保留统计所需的<b>可分性</b>——保留姓氏、保留身份证地区码与出生年份段、地址泛化到区县，
+  保证「按年龄段统计」「按地域统计」等分析口径不失效。姓名/手机号/病历号采用<b>确定性脱敏</b>
+  （同一原值 + 同一盐 → 同一脱敏值），使跨表 join 保持一致，不会破坏数据关联性。
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>字段级脱敏规则</h3><span class="sub" id="ruleCount"></span></div>
+    <div class="bd">
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>字段</th><th>脱敏方式</th><th>可逆性</th></tr></thead>
+          <tbody id="ruleBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>脱敏前后对照</h3><span class="sub">示例数据（第 1 条记录）</span></div>
+    <div class="bd">
+      <div class="scroll">
+        <table class="tbl">
+          <thead><tr><th>字段</th><th>脱敏前</th><th>脱敏后</th></tr></thead>
+          <tbody id="cmpBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>脱敏规则明细</h3><span class="sub">含规则实现方法、设计依据与示例</span></div>
+  <div class="bd"><div id="detail"></div></div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+async function load() {
+  const rules = await getJSON('/api/desensitize');
+  document.getElementById('ruleCount').textContent = `共 ${rules.length} 条规则`;
+
+  document.getElementById('ruleBody').innerHTML = rules.map(r => `
+    <tr><td><b>${r.field_name}</b></td><td>${r.rule_type}</td>
+    <td><span class="badge">${r.reversible || '-'}</span></td></tr>`).join('');
+
+  document.getElementById('cmpBody').innerHTML = rules.map(r => `
+    <tr>
+      <td>${r.field_name.split(' ')[0]}</td>
+      <td class="mono" style="color:#b91c1c">${escapeHtml(r.example_raw)}</td>
+      <td class="mono" style="color:#15803d">${escapeHtml(r.example_masked)}</td>
+    </tr>`).join('');
+
+  document.getElementById('detail').innerHTML = rules.map((r, i) => `
+    <div style="padding:12px 0;${i ? 'border-top:1px dashed #e3e8ef' : ''}">
+      <div style="font-weight:600;margin-bottom:6px">
+        <span class="legend-dot" style="background:#1f6feb"></span>${r.field_name}
+        <span class="badge" style="margin-left:8px">${r.rule_type}</span>
+        <span class="badge green" style="margin-left:4px">${r.reversible || '-'}</span>
+      </div>
+      <div style="font-size:13px;color:#4b5563;line-height:1.9">
+        <b>脱敏方法：</b>${r.method_desc}<br>
+        <b>设计依据：</b>${r.principle}<br>
+        <b>示例：</b><code style="color:#b91c1c">${escapeHtml(r.example_raw)}</code>
+        &nbsp;→&nbsp;<code style="color:#15803d">${escapeHtml(r.example_masked)}</code>
+      </div>
+    </div>`).join('');
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+window.addEventListener('DOMContentLoaded', load);
+</script>
+{% endblock %}

@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block title %}疾病共现网络{% endblock %}
+{% block pagetitle %}疾病共现网络分析（Spark GraphX）{% endblock %}
+{% block pagesub %}PageRank · 连通分量 · 标签传播社区发现 · 三角计数{% endblock %}
+
+{% block content %}
+<div class="notice" style="margin-bottom:16px">
+  <b>业务含义：</b>同一患者在一段时间内先后被诊断出多种疾病，这些疾病之间就构成「共现关系」。
+  以疾病为顶点、共现关系为边，可得到<b>疾病共现网络（Comorbidity Network）</b>：
+  处在网络中心的疾病一旦发生，并发其他疾病的风险最高；聚成一簇的疾病往往提示共同的病理机制或诊疗路径。<br>
+  <b>图算法：</b>PageRank（疾病重要性）· 连通分量（疾病大簇）· 标签传播（共病亚群）· 三角计数（局部聚集度）·
+  加权度（共现患者总量）。算法实现与 GraphX 算子一一对应，另有 Scala 原生 GraphX 版本用于集群提交。
+</div>
+
+<div class="grid g4" id="netKpi" style="margin-bottom:16px"></div>
+
+<div class="card">
+  <div class="hd">
+    <h3>疾病共现网络图</h3>
+    <span class="sub">节点大小 = 患病人数，颜色 = 疾病大类，连线粗细 = 共现患者数（仅展示权重最高的拓扑）</span>
+  </div>
+  <div class="bd">
+    <div class="toolbar">
+      <label>展示节点数</label>
+      <select id="topN" class="filter">
+        <option value="30">TOP 30</option>
+        <option value="50" selected>TOP 50</option>
+        <option value="80">TOP 80</option>
+      </select>
+      <label>最小共现权重</label>
+      <select id="minW" class="filter">
+        <option value="5">≥ 5 例</option>
+        <option value="10" selected>≥ 10 例</option>
+        <option value="20">≥ 20 例</option>
+      </select>
+      <label><input type="checkbox" id="showLabel" checked style="vertical-align:-2px"> 显示疾病名</label>
+    </div>
+    <div id="cNet" class="chart h520"></div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>疾病中心性排名（PageRank）</h3><span class="sub">值越高越处于共现网络中心</span></div>
+    <div class="bd"><div id="cPr" class="chart h400"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>共病社区规模分布</h3><span class="sub">标签传播算法识别出的共病亚群</span></div>
+    <div class="bd"><div id="cComm" class="chart h400"></div></div>
+  </div>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>疾病大类在网络中的地位</h3><span class="sub">各疾病大类的平均 PageRank 与节点数</span></div>
+    <div class="bd"><div id="cCat" class="chart h360"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>共现关系强度 TOP15</h3><span class="sub">两病共同出现的患者数</span></div>
+    <div class="bd"><div id="cEdge" class="chart h360"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>疾病节点明细</h3><span class="sub" id="tblSub"></span></div>
+  <div class="bd">
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th class="num">排名</th><th>ICD-10</th><th>疾病名称</th><th>疾病大类</th>
+          <th class="num">患病人数</th><th class="num">度数</th><th class="num">加权度</th>
+          <th class="num">PageRank</th><th class="num">连通分量</th><th class="num">社区</th><th class="num">三角数</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+let cNet, cPr, cComm, cCat, cEdge;
+let allNodes = [], allEdges = [];
+
+function kpiCard(label, value, unit, foot, cls) {
+  return `<div class="kpi ${cls || ''}"><div class="label">${label}</div>
+    <div class="value">${value}<span class="unit">${unit || ''}</span></div>
+    <div class="foot">${foot || ''}</div></div>`;
+}
+function metricOf(ms, name) {
+  const r = ms.find(x => x.metric_name === name);
+  return r ? Number(r.metric_value) : null;
+}
+
+async function loadMetrics() {
+  const d = await getJSON('/api/network/metrics');
+  const m = d.metrics;
+  document.getElementById('netKpi').innerHTML =
+    kpiCard('疾病节点数', fmt(metricOf(m, '疾病节点数')), '个', '共现网络中的疾病种数', '') +
+    kpiCard('共现边数', fmt(metricOf(m, '共现边数')), '条', '权重 ≥ ' + metricOf(m, '共现权重下限') + ' 例', 'accent') +
+    kpiCard('平均度数', (metricOf(m, '平均度数') ?? 0).toFixed(2), '', '平均每个疾病与多少种疾病共现', 'warn') +
+    kpiCard('共病社区数', fmt(metricOf(m, '社区数')), '个', '标签传播识别的共病亚群', 'danger');
+
+  const all = d.communities.slice(0, 15);
+  cComm.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => { const x = all[ps[0].dataIndex];
+        return `社区 ${x.community_id}<br/>疾病数：<b>${x.node_cnt}</b><br/>患者合计：${fmt(x.patient_sum)}`; } },
+    grid: { left: 62, right: 24, top: 20, bottom: 46 },
+    xAxis: { type: 'category', data: all.map(x => '社区 ' + x.community_id), axisLabel: { ...axisLabel(), rotate: 40 } },
+    yAxis: { type: 'value', name: '疾病数', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{ type: 'bar', barMaxWidth: 30,
+      data: all.map((x, i) => ({ value: x.node_cnt, itemStyle: { color: PALETTE[i % PALETTE.length], borderRadius: [4, 4, 0, 0] } })),
+      label: { show: true, position: 'top', fontSize: 11, color: '#6b7280' } }]
+  });
+
+  const cats = d.categories.slice(0, 12);
+  cCat.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => { const x = cats[ps[0].dataIndex];
+        return `<b>${x.disease_category}</b><br/>节点数：${x.node_cnt}<br/>患者合计：${fmt(x.patient_sum)}<br/>平均 PageRank：${Number(x.avg_pr).toFixed(6)}`; } },
+    legend: { top: 0, textStyle: axisLabel() },
+    grid: { left: 130, right: 60, top: 30, bottom: 20 },
+    xAxis: [{ type: 'value', name: '节点数', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } }],
+    yAxis: { type: 'category', data: cats.map(x => x.disease_category).reverse(), axisLabel: axisLabel() },
+    series: [{ name: '节点数', type: 'bar', barMaxWidth: 15,
+      data: cats.map(x => x.node_cnt).reverse(),
+      itemStyle: { color: '#1f6feb', borderRadius: [0, 4, 4, 0] },
+      label: { show: true, position: 'right', fontSize: 10.5, color: '#6b7280' } }]
+  });
+}
+
+async function loadGraph() {
+  const n = Number(document.getElementById('topN').value);
+  const minW = Number(document.getElementById('minW').value);
+  const showLabel = document.getElementById('showLabel').checked;
+
+  allNodes = await getJSON('/api/network/nodes?limit=' + n);
+  allEdges = await getJSON('/api/network/edges?limit=400');
+
+  const nameSet = new Set(allNodes.map(x => x.disease_name));
+  const edges = allEdges.filter(e => nameSet.has(e.src_name) && nameSet.has(e.dst_name) && Number(e.weight) >= minW);
+
+  const cats = [...new Set(allNodes.map(x => x.disease_category).filter(Boolean))];
+  const catColor = {};
+  cats.forEach((c, i) => catColor[c] = PALETTE[i % PALETTE.length]);
+
+  const maxP = Math.max(...allNodes.map(x => Number(x.patient_cnt)));
+  const nodes = allNodes.map(x => ({
+    name: x.disease_name,
+    value: Number(x.patient_cnt),
+    symbolSize: 12 + 30 * Math.sqrt(Number(x.patient_cnt) / maxP),
+    itemStyle: { color: catColor[x.disease_category] || '#6b7280' },
+    label: { show: showLabel, fontSize: 10.5, color: '#374151', formatter: '{b}' },
+    category: x.disease_category
+  }));
+  const maxW = Math.max(...edges.map(e => Number(e.weight)), 1);
+
+  cNet.setOption({
+    tooltip: {
+      formatter: p => {
+        if (p.dataType === 'edge') {
+          const e = allEdges.find(x => x.src_name === p.data.source && x.dst_name === p.data.target);
+          return `${p.data.source} ⇄ ${p.data.target}<br/>共现患者数：<b>${p.data.value}</b><br/>` +
+                 `${e ? e.src_category + ' ⇄ ' + e.dst_category : ''}`;
+        }
+        const nd = allNodes.find(x => x.disease_name === p.data.name) || {};
+        return `<b>${p.data.name}</b>（${nd.diagnosis_code || '-'}）<br/>疾病大类：${nd.disease_category || '-'}<br/>` +
+               `患病人数：${fmt(nd.patient_cnt)}<br/>度数：${nd.degree}（共现病种数）<br/>加权度：${fmt(nd.weighted_degree)}<br/>` +
+               `PageRank：${Number(nd.pagerank).toFixed(6)}<br/>共病社区：${nd.community_id}｜连通分量：${nd.component_id}<br/>三角数：${nd.triangle_cnt}`;
+      }
+    },
+    legend: [{ data: cats, top: 0, type: 'scroll', textStyle: axisLabel(), itemWidth: 10, itemHeight: 10 }],
+    series: [{
+      type: 'graph', layout: 'force', roam: true, draggable: true,
+      // 关键：graph 系列必须显式提供 categories，legend 的条目才能与节点分类对应上。
+      // 若只给 legend.data 而不给 series.categories，ECharts 会认为该 series 未被图例覆盖，
+      // 从而把整个图隐藏掉（表现为图形区域一片空白）。
+      categories: cats.map(c => ({ name: c })),
+      force: { repulsion: 900, edgeLength: [80, 240], gravity: 0.06, friction: 0.12 },
+      data: nodes,
+      links: edges.map(e => ({ source: e.src_name, target: e.dst_name, value: Number(e.weight),
+                               lineStyle: { width: 0.8 + 4.2 * Number(e.weight) / maxW, curveness: 0.08,
+                                            color: 'rgba(120,150,190,.42)' } })),
+      emphasis: { focus: 'adjacency', lineStyle: { width: 4, color: '#e8833a' } },
+      labelLayout: { hideOverlap: true }
+    }]
+  });
+
+  document.getElementById('tblSub').textContent = `共 ${allNodes.length} 个疾病节点（按 PageRank 降序）`;
+
+  const top = allNodes.slice(0, 15).reverse();
+  cPr.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => { const x = allNodes.find(y => y.disease_name === ps[0].axisValue) || {};
+        return `<b>${ps[0].axisValue}</b><br/>PageRank：${Number(x.pagerank).toFixed(6)}<br/>度数：${x.degree}<br/>患病人数：${fmt(x.patient_cnt)}`; } },
+    grid: { left: 140, right: 70, top: 16, bottom: 16 },
+    xAxis: { type: 'value', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top.map(x => x.disease_name), axisLabel: axisLabel() },
+    series: [{ type: 'bar', barMaxWidth: 16,
+      data: top.map((x, i) => ({ value: Number(x.pagerank), itemStyle: { color: PALETTE[(top.length - 1 - i) % PALETTE.length], borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', fontSize: 10.5, color: '#6b7280', formatter: p => Number(p.value).toFixed(5) } }]
+  });
+
+  const topE = allEdges.slice(0, 15).reverse();
+  cEdge.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: 160, right: 70, top: 16, bottom: 16 },
+    xAxis: { type: 'value', name: '共现患者数', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: topE.map(e => e.src_name + ' ⇄ ' + e.dst_name), axisLabel: { ...axisLabel(), fontSize: 10.5 } },
+    series: [{ type: 'bar', barMaxWidth: 14,
+      data: topE.map(e => ({ value: Number(e.weight), itemStyle: { color: '#e8833a', borderRadius: [0, 4, 4, 0] } })),
+      label: { show: true, position: 'right', fontSize: 10.5, color: '#6b7280' } }]
+  });
+
+  document.getElementById('tbody').innerHTML = allNodes.map((x, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td class="mono">${x.diagnosis_code || '-'}</td>
+      <td>${x.disease_name}${Number(x.is_infectious) === 1 ? ' <span class="badge orange">传染病</span>' : ''}</td>
+      <td>${x.disease_category || '-'}</td>
+      <td class="num">${fmt(x.patient_cnt)}</td>
+      <td class="num">${x.degree}</td>
+      <td class="num">${fmt(x.weighted_degree)}</td>
+      <td class="num">${Number(x.pagerank).toFixed(6)}</td>
+      <td class="num">${x.component_id}</td>
+      <td class="num">${x.community_id}</td>
+      <td class="num">${x.triangle_cnt}</td>
+    </tr>`).join('');
+}
+
+window.addEventListener('DOMContentLoaded', async () => {
+  cNet = initChart('cNet'); cPr = initChart('cPr');
+  cComm = initChart('cComm'); cCat = initChart('cCat'); cEdge = initChart('cEdge');
+  try {
+    await loadMetrics();
+    await loadGraph();
+  } catch (e) { alert(e.message); }
+  ['topN', 'minW'].forEach(id => document.getElementById(id).addEventListener('change', loadGraph));
+  document.getElementById('showLabel').addEventListener('change', loadGraph);
+});
+</script>
+{% endblock %}

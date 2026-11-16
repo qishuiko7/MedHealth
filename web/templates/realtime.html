@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}实时数据监控{% endblock %}
+{% block pagetitle %}实时数据监控{% endblock %}
+{% block pagesub %}爬虫（CDC 疫情公报）→ Kafka → Spark Streaming 实时链路（60 秒滚动窗口）{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <button class="btn primary" id="btnRefresh">立即刷新</button>
+  <label><input type="checkbox" id="autoRefresh" checked style="vertical-align:-2px"> 每 5 秒自动刷新</label>
+  <span class="badge" id="lastUpdate">—</span>
+  <span class="badge" id="statusBadge">链路状态检测中…</span>
+</div>
+
+<div class="notice warn" id="emptyHint" style="display:none; margin-bottom:16px">
+  <b>当前没有实时数据。</b>实时数据需要单独启动一条流处理链路，请打开两个终端依次执行：<br>
+  <code>cd code/realtime && python crawler.py --pages 3 --rate 15</code>　（爬取中国疾控中心公开疫情公报并投递 Kafka）<br>
+  <code>cd code/realtime && python local_stream.py --window 10</code>　（按窗口聚合并写入 MySQL，页面会在 5 秒内自动出现数据）<br>
+  <span style="color:#8a5a12">说明：集群环境下对应的是 Kafka + Spark Streaming（spark_streaming_job.py）；爬虫源为 chinacdc.cn 公开发布的月度法定传染病统计表（无隐私信息）。</span>
+</div>
+
+<div class="grid g4" id="rtKpi" style="margin-bottom:16px"></div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>实时窗口就诊量趋势</h3><span class="sub">按 60 秒窗口聚合</span></div>
+    <div class="bd"><div id="cRtLine" class="chart h320"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>各科室实时接诊量</h3><span class="sub">最近窗口内的科室分布</span></div>
+    <div class="bd"><div id="cRtDept" class="chart h320"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>爬虫实时病种监测（中国疾控中心公开公报）</h3>
+    <span class="sub" id="crawlSub">最新窗口 · 按发病数排序</span></div>
+  <div class="bd">
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th>公报期次</th><th>病种名称</th>
+          <th class="num">发病数</th><th class="num">死亡数</th><th>数据来源</th><th>抓取时间</th>
+        </tr></thead>
+        <tbody id="crawlBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>实时窗口明细</h3><span class="sub">最近 200 条窗口记录</span></div>
+  <div class="bd">
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th>窗口开始</th><th>窗口结束</th><th>科室</th>
+          <th class="num">就诊量</th><th class="num">爬虫发病数</th><th class="num">爬虫死亡数</th>
+          <th class="num">处方金额(元)</th><th>写入时间</th>
+        </tr></thead>
+        <tbody id="rtBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="notice" style="margin-top:4px">
+  <b>链路说明：</b>实时链路为 <code>爬虫（CDC 公开疫情公报 crawler.py）→ Kafka（主题 med_registration / med_visit / med_prescription）→
+  Spark Streaming（60 秒滚动窗口，清洗 + 按科室/病种聚合）→ MySQL（rt_visit_stat / rt_kpi / rt_crawler_stat）→ 本页面轮询展示</code>。<br>
+  爬虫源为中国疾病预防控制中心官网公开发布的《全国法定传染病疫情情况》月度统计表，仅用于课程设计教学演示，不含任何个人隐私信息。<br>
+  在未部署 Kafka / Spark 的 Windows 单机环境下，可用 <code>crawler.py --local</code> + <code>local_stream.py</code> 等价演示，
+  写入的数据结构与集群模式完全一致。
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+let cLine, cDept, timer = null;
+
+function rtCard(label, value, unit, cls) {
+  return `<div class="kpi ${cls || ''}"><div class="label">${label}</div>
+    <div class="value">${value}<span class="unit">${unit || ''}</span></div></div>`;
+}
+
+async function load() {
+  try {
+    const d = await getJSON('/api/realtime');
+    const stats = d.stats || [], kpi = d.kpi, crawler = d.crawler || [];
+    const nMsg = stats.length + crawler.length;
+    document.getElementById('statusBadge').textContent = nMsg ? '实时链路正常 · 数据量 ' + nMsg + ' 条' : '暂未检测到实时数据';
+    document.getElementById('statusBadge').className = 'badge ' + (nMsg ? 'green' : 'orange');
+    document.getElementById('emptyHint').style.display = nMsg ? 'none' : 'block';
+    document.getElementById('lastUpdate').textContent = '刷新时间：' + new Date().toLocaleTimeString('zh-CN');
+
+    if (kpi) {
+      document.getElementById('rtKpi').innerHTML =
+        rtCard('当前窗口挂号量', fmt(kpi.reg_cnt), '人次', '') +
+        rtCard('当前窗口就诊量', fmt(kpi.visit_cnt), '人次', 'accent') +
+        rtCard('当前窗口处方金额', fmtWan(kpi.presc_amount), '元', 'warn') +
+        rtCard('吞吐速率', kpi.msg_per_sec ?? '-', '条/秒', '');
+    } else {
+      document.getElementById('rtKpi').innerHTML = rtCard('实时数据', '暂无', '', '');
+    }
+
+    // —— 爬虫病种明细 ——
+    const cSub = document.getElementById('crawlSub');
+    if (crawler.length) {
+      cSub.textContent = '最新窗口 ' + String(crawler[0].window_end || '').replace('T', ' ') +
+                         ' · 共 ' + crawler.length + ' 个病种';
+    } else {
+      cSub.textContent = '最新窗口 · 按发病数排序';
+    }
+    document.getElementById('crawlBody').innerHTML = crawler.length ? crawler.map(c => `
+      <tr>
+        <td class="mono">${c.period || '-'}</td>
+        <td>${c.disease_name}</td>
+        <td class="num">${fmt(c.case_cnt)}</td>
+        <td class="num">${fmt(c.death_cnt)}</td>
+        <td><span class="badge green">${c.source || 'CDC-crawler'}</span></td>
+        <td class="mono">${String(c.update_time || '').replace('T', ' ')}</td>
+      </tr>`).join('') : '<tr><td colspan="6" style="text-align:center;color:#9aa4b2">暂无爬虫数据</td></tr>';
+
+    const byWin = {};
+    stats.forEach(s => { const k = s.window_end; byWin[k] = (byWin[k] || 0) + Number(s.visit_cnt); });
+    const wins = Object.keys(byWin).sort().slice(-30);
+    cLine.setOption({
+      tooltip: { trigger: 'axis' },
+      grid: baseGrid(),
+      xAxis: { type: 'category', data: wins.map(w => String(w).slice(11, 19)), axisLabel: { ...axisLabel(), rotate: 40 } },
+      yAxis: { type: 'value', name: '就诊量', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+      series: [{
+        type: 'line', smooth: true, data: wins.map(w => byWin[w]), symbolSize: 6,
+        itemStyle: { color: '#2f9e6e' }, lineStyle: { width: 2.6 },
+        areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(47,158,110,.32)' }, { offset: 1, color: 'rgba(47,158,110,.02)' }]) }
+      }]
+    });
+
+    const latestWin = wins.length ? wins[wins.length - 1] : null;
+    const deptAgg = {};
+    stats.filter(s => s.window_end === latestWin).forEach(s => {
+      deptAgg[s.dept_name] = (deptAgg[s.dept_name] || 0) + Number(s.visit_cnt);
+    });
+    const dArr = Object.entries(deptAgg).sort((a, b) => b[1] - a[1]).slice(0, 10).reverse();
+    cDept.setOption({
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+      grid: { left: 105, right: 50, top: 16, bottom: 16 },
+      xAxis: { type: 'value', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+      yAxis: { type: 'category', data: dArr.map(x => x[0]), axisLabel: axisLabel() },
+      series: [{
+        type: 'bar', barMaxWidth: 16,
+        data: dArr.map(x => ({ value: x[1], itemStyle: { color: '#2f9e6e', borderRadius: [0, 4, 4, 0] } })),
+        label: { show: true, position: 'right', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) }
+      }]
+    });
+
+    document.getElementById('rtBody').innerHTML = stats.slice(0, 200).map(s => `
+      <tr>
+        <td class="mono">${String(s.window_start).replace('T', ' ')}</td>
+        <td class="mono">${String(s.window_end).replace('T', ' ')}</td>
+        <td>${s.dept_name}</td>
+        <td class="num">${fmt(s.visit_cnt)}</td>
+        <td class="num">${fmt(s.case_cnt)}</td>
+        <td class="num">${fmt(s.death_cnt)}</td>
+        <td class="num">${fmt(s.presc_amount, 2)}</td>
+        <td class="mono">${String(s.update_time || '').replace('T', ' ')}</td>
+      </tr>`).join('');
+  } catch (e) { console.error(e); }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  cLine = initChart('cRtLine'); cDept = initChart('cRtDept');
+  document.getElementById('btnRefresh').addEventListener('click', load);
+  document.getElementById('autoRefresh').addEventListener('change', e => {
+    if (e.target.checked) { timer = setInterval(load, 5000); } else { clearInterval(timer); timer = null; }
+  });
+  load();
+  timer = setInterval(load, 5000);
+});
+</script>
+{% endblock %}

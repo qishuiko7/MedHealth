@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}科室工作量{% endblock %}
+{% block pagetitle %}科室工作量分析{% endblock %}
+{% block pagesub %}挂号量 · 就诊量 · 住院人次 · 收入贡献 · 综合工作量指数{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <label>统计周期</label>
+  <select id="period" class="filter"></select>
+  <label>排序依据</label>
+  <select id="sortBy" class="filter">
+    <option value="workload_index">综合工作量指数</option>
+    <option value="visit_cnt">就诊量</option>
+    <option value="reg_cnt">挂号量</option>
+    <option value="admission_cnt">住院人次</option>
+    <option value="presc_amount">处方金额</option>
+  </select>
+  <label>图表条数</label>
+  <select id="topN" class="filter"><option>10</option><option selected>15</option><option>20</option></select>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>科室工作量排名</h3><span class="sub">横向条形，可切换排序指标</span></div>
+    <div class="bd"><div id="cBar" class="chart h420"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>就诊量与处方金额分布</h3><span class="sub">气泡面积表示住院人次</span></div>
+    <div class="bd"><div id="cScatter" class="chart h420"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>科室指标明细</h3><span class="sub" id="tblSub"></span></div>
+  <div class="bd">
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th class="num">排名</th><th>科室</th><th>类型</th>
+          <th class="num">挂号量</th><th class="num">就诊量</th><th class="num">住院人次</th>
+          <th class="num">处方金额(元)</th><th class="num">药品数量</th>
+          <th class="num">次均挂号费(元)</th><th class="num">平均住院日(天)</th><th class="num">工作量指数</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const periods = {{ periods | tojson }};
+let cBar, cScatter, cache = [];
+
+const SORT_LABEL = { workload_index: '综合工作量指数', visit_cnt: '就诊量', reg_cnt: '挂号量',
+                     admission_cnt: '住院人次', presc_amount: '处方金额' };
+
+async function load(period) {
+  cache = await getJSON('/api/dept?period=' + encodeURIComponent(period));
+  render(period);
+}
+
+function render(period) {
+  const key = document.getElementById('sortBy').value;
+  const n = Number(document.getElementById('topN').value);
+  const list = cache.slice().sort((a, b) => Number(b[key]) - Number(a[key]));
+  document.getElementById('tblSub').textContent = `周期：${period} · 排序：${SORT_LABEL[key]} · 共 ${list.length} 个科室`;
+
+  const top = list.slice(0, n).reverse();
+  cBar.setOption({
+    tooltip: {
+      trigger: 'axis', axisPointer: { type: 'shadow' },
+      formatter: ps => {
+        const name = ps[0].axisValue;
+        const d = cache.find(x => x.dept_name === name) || {};
+        return `<b>${name}</b>（${d.dept_type_name || '-'}）<br/>` +
+               `${SORT_LABEL[key]}：<b>${fmt(ps[0].value)}</b><br/>` +
+               `挂号量：${fmt(d.reg_cnt)}<br/>就诊量：${fmt(d.visit_cnt)}<br/>` +
+               `住院人次：${fmt(d.admission_cnt)}<br/>处方金额：${fmtWan(d.presc_amount)} 元`;
+      }
+    },
+    grid: { left: 105, right: 90, top: 16, bottom: 16 },
+    xAxis: { type: 'value', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top.map(x => x.dept_name), axisLabel: axisLabel() },
+    series: [{
+      type: 'bar', barMaxWidth: 17,
+      data: top.map((x, i) => ({
+        value: Number(x[key]),
+        itemStyle: { color: x.dept_type_name === '住院科室' ? '#2f9e6e' : (x.dept_type_name === '门诊科室' ? '#1f6feb' : '#8b5cf6'), borderRadius: [0, 4, 4, 0] }
+      })),
+      label: { show: true, position: 'right', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) }
+    }]
+  });
+
+  const points = cache.map(x => ({
+    name: x.dept_name,
+    value: [Number(x.visit_cnt), Number(x.presc_amount), Number(x.admission_cnt), x.dept_type_name],
+    itemStyle: { color: x.dept_type_name === '住院科室' ? 'rgba(47,158,110,.75)' : 'rgba(31,111,235,.7)' }
+  }));
+  cScatter.setOption({
+    tooltip: {
+      trigger: 'item',
+      formatter: p => `<b>${p.data.name}</b><br/>就诊量：${fmt(p.value[0])} 人次<br/>处方金额：${fmt(p.value[1])} 元<br/>住院人次：${fmt(p.value[2])}<br/>类型：${p.value[3]}`
+    },
+    grid: { left: 82, right: 30, top: 24, bottom: 46 },
+    xAxis: { type: 'value', name: '就诊量（人次）', nameLocation: 'middle', nameGap: 27, axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'value', name: '处方金额（元）', axisLabel: { ...axisLabel(), formatter: v => fmtWan(v, 0) }, splitLine: { lineStyle: { color: '#eef2f7' } } },
+    series: [{
+      type: 'scatter',
+      symbolSize: d => Math.max(10, Math.min(44, Math.sqrt(d[2]) * 2.6)),
+      data: points,
+      label: { show: true, formatter: p => p.data.name, position: 'top', fontSize: 10.5, color: '#4b5563' },
+      emphasis: { focus: 'series' }
+    }]
+  });
+
+  document.getElementById('tbody').innerHTML = list.map((x, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td>${x.dept_name}</td>
+      <td>${x.dept_type_name || '-'}</td>
+      <td class="num">${fmt(x.reg_cnt)}</td>
+      <td class="num">${fmt(x.visit_cnt)}</td>
+      <td class="num">${fmt(x.admission_cnt)}</td>
+      <td class="num">${fmt(x.presc_amount, 2)}</td>
+      <td class="num">${fmt(x.drug_qty)}</td>
+      <td class="num">${x.avg_reg_fee ?? '-'}</td>
+      <td class="num">${x.los_avg_days ?? '-'}</td>
+      <td class="num"><b>${fmt(x.workload_index, 1)}</b></td>
+    </tr>`).join('');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  cBar = initChart('cBar'); cScatter = initChart('cScatter');
+  let cur = '全部';
+  periodSelect('period', periods, p => { cur = p; load(p); });
+  document.getElementById('sortBy').addEventListener('change', () => render(cur));
+  document.getElementById('topN').addEventListener('change', () => render(cur));
+});
+</script>
+{% endblock %}

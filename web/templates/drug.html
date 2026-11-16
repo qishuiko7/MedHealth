@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}药品消耗分析{% endblock %}
+{% block pagetitle %}药品消耗分析{% endblock %}
+{% block pagesub %}药品金额榜 · 数量榜 · 类别结构{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <label>统计周期</label>
+  <select id="period" class="filter"></select>
+  <label>排行依据</label>
+  <select id="sortBy" class="filter">
+    <option value="total_amount">消耗金额</option>
+    <option value="total_qty">消耗数量</option>
+    <option value="presc_times">开具次数</option>
+  </select>
+  <label>条数</label>
+  <select id="topN" class="filter"><option>10</option><option selected>15</option><option>20</option></select>
+  <span class="badge" id="sumBadge"></span>
+</div>
+
+<div class="grid g2">
+  <div class="card">
+    <div class="hd"><h3>药品消耗排行榜</h3><span class="sub">横向条形，可切换统计口径</span></div>
+    <div class="bd"><div id="cRank" class="chart h420"></div></div>
+  </div>
+  <div class="card">
+    <div class="hd"><h3>药品类别金额结构</h3><span class="sub">按药品大类汇总</span></div>
+    <div class="bd"><div id="cType" class="chart h420"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="hd"><h3>药品消耗明细</h3><span class="sub" id="tblSub"></span></div>
+  <div class="bd">
+    <div class="scroll">
+      <table class="tbl">
+        <thead><tr>
+          <th class="num">排名</th><th>药品名称</th><th>类别</th>
+          <th class="num">消耗数量</th><th class="num">消耗金额(元)</th><th class="num">开具次数</th>
+          <th class="num">数量占比</th><th class="num">金额占比</th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const periods = {{ periods | tojson }};
+let cRank, cType, cache = [], byType = [];
+
+const SORT_LABEL = { total_amount: '消耗金额', total_qty: '消耗数量', presc_times: '开具次数' };
+
+async function load(period) {
+  const d = await getJSON('/api/drug?period=' + encodeURIComponent(period));
+  cache = d.list; byType = d.by_type;
+  render(period);
+}
+
+function render(period) {
+  const key = document.getElementById('sortBy').value;
+  const n = Number(document.getElementById('topN').value);
+  const sorted = cache.slice().sort((a, b) => Number(b[key]) - Number(a[key]));
+  const totalAmt = cache.reduce((s, x) => s + Number(x.total_amount), 0);
+  const totalQty = cache.reduce((s, x) => s + Number(x.total_qty), 0);
+  document.getElementById('sumBadge').textContent =
+    `药品品种 ${cache.length} 个，金额合计 ${fmtWan(totalAmt)} 元，数量合计 ${fmtWan(totalQty)} 单位`;
+  document.getElementById('tblSub').textContent = `周期：${period} · 排序：${SORT_LABEL[key]}`;
+
+  const top = sorted.slice(0, n).reverse();
+  cRank.setOption({
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+    grid: { left: 150, right: 96, top: 16, bottom: 16 },
+    xAxis: { type: 'value', axisLabel: axisLabel(), splitLine: { lineStyle: { color: '#eef2f7' } } },
+    yAxis: { type: 'category', data: top.map(x => x.drug_name), axisLabel: axisLabel() },
+    series: [{
+      type: 'bar', barMaxWidth: 16,
+      data: top.map(x => ({ value: Number(x[key]), itemStyle: { borderRadius: [0, 4, 4, 0], color: key === 'total_amount' ? '#e8833a' : '#1f6feb' } })),
+      label: { show: true, position: 'right', fontSize: 11, color: '#6b7280', formatter: p => fmt(p.value) }
+    }]
+  });
+
+  cType.setOption({
+    tooltip: { trigger: 'item', formatter: p => `${p.name}<br/>金额 ${fmtWan(p.value)} 元 (${p.percent}%)` },
+    legend: { type: 'scroll', orient: 'vertical', right: 4, top: 16, bottom: 16, textStyle: axisLabel(), itemWidth: 10, itemHeight: 10 },
+    series: [{
+      type: 'pie', radius: ['40%', '68%'], center: ['36%', '52%'],
+      data: byType.slice(0, 14).map(x => ({ name: x.drug_type, value: Number(x.amount) })),
+      itemStyle: { borderColor: '#fff', borderWidth: 2 },
+      label: { formatter: '{b}\n{d}%', fontSize: 10.5, color: '#374151' },
+      labelLine: { length: 6, length2: 6 },
+      color: PALETTE
+    }]
+  });
+
+  document.getElementById('tbody').innerHTML = sorted.map((x, i) => `
+    <tr>
+      <td class="num">${i + 1}</td>
+      <td>${x.drug_name}</td>
+      <td><span class="badge">${x.drug_type || '-'}</span></td>
+      <td class="num">${fmt(x.total_qty)}</td>
+      <td class="num">${fmt(x.total_amount, 2)}</td>
+      <td class="num">${fmt(x.presc_times)}</td>
+      <td class="num">${x.qty_ratio}%</td>
+      <td class="num">${x.amount_ratio}%</td>
+    </tr>`).join('');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  cRank = initChart('cRank'); cType = initChart('cType');
+  let cur = '全部';
+  periodSelect('period', periods, p => { cur = p; load(p); });
+  document.getElementById('sortBy').addEventListener('change', () => render(cur));
+  document.getElementById('topN').addEventListener('change', () => render(cur));
+});
+</script>
+{% endblock %}

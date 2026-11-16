@@ -1,0 +1,76 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 虚拟环境
+venv/
+.venv/
+ENV/
+env/
+.python-version
+
+# ---- 数据产物（可由 run_all.py 重新生成）----
+output/
+*.csv
+!docs/**/*.csv
+
+# ---- 日志与临时文件 ----
+*.log
+logs/
+*.tmp
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- IDE ----
+.idea/
+.vscode/
+*.iml
+*.sublime-*
+
+# ---- 大数据 / 环境（不纳入版本控制）----
+# 大数据组件安装目录
+hadoop/
+hive/
+spark/
+kafka/
+zookeeper/
+# MySQL 免安装版
+mysql/
+data/
+# JDK
+jdk*/
+# 虚拟机镜像
+*.vmdk
+*.vdi
+*.ova
+*.ovf
+*.vmx
+*.qcow2
+
+# ---- 敏感配置 ----
+config_local.py
+.env
+*.secret
