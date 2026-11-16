@@ -1,0 +1,36 @@
+# 医疗健康数据平台与疾病统计分析 —— Python 依赖
+# 适用：ETL / 数据生成 / Web 服务（Python 3.10 ~ 3.13）
+# 安装： pip install -r requirements.txt
+
+# ---- 数据处理 ----
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14.0
+openpyxl>=3.1          # Excel 报表导出
+
+# ---- 数据库 ----
+PyMySQL>=1.1
+cryptography>=41.0     # 必需：PyMySQL 连接 MySQL 8.0 caching_sha2_password 认证需要它
+SQLAlchemy>=2.0
+
+# ---- Web 服务 ----
+Flask>=3.0
+
+# ---- 实时链路（爬虫 + Kafka）----
+requests>=2.28         # 实时爬虫 crawler.py 抓取 CDC 公开疫情公报
+kafka-python>=2.0      # 事件投递 Kafka（集群模式）
+# 注：VM 侧运行 Spark Streaming 还需 cryptography（MySQL8 caching_sha2_password 认证）：
+#     pip3 install pymysql requests 'cryptography==3.3.2' -i https://mirrors.aliyun.com/pypi/simple/
+
+# ---- 报告生成与插图 ----
+python-docx>=1.1       # 生成课程设计报告
+matplotlib>=3.8        # 生成架构图与流程图
+tabulate>=0.9          # data_dict.md 表格
+
+# ---- 说明 ----
+# 1) PySpark 不需要 pip 安装：直接使用 Spark 发行版自带的 python 包
+#    （见 05_大数据环境_Windows/bin/spark-run.sh，用 PYTHONPATH 指向 Spark 的 python 目录）。
+# 2) PySpark 运行时需要单独一个 Python 3.10 环境并安装 numpy / pandas / pymysql，
+#    详见《README_新电脑完整复现指南.md》第四章 4.3 节。
+# 3) 自动化截图（可选）：Node.js + playwright
+# 4) 平台部署与日常启停步骤，见《操作指南.md》。

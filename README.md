@@ -64,15 +64,27 @@
 
 ## 快速开始
 
-### 方式一：只看可视化平台（最常用，约 10 秒）
-
-平台所需的统计结果、模型指标、网络数据已预置在 MySQL 中，无需重跑 Spark。
+### 前置准备
 
 ```bash
-# 1. 启动 MySQL（需自行准备 MySQL 8.0 并导入数据）
-# 2. 启动 Web 平台
-cd web
+# 1. 安装 Python 依赖
 pip install -r requirements.txt
+
+# 2. 准备 MySQL 8.0（需可被 127.0.0.1:3306 访问）
+
+# 3. 导入数据库备份（含全部业务数据与统计结果）
+mysql -u root -p < database/med_health_数据备份.sql
+```
+
+> 数据库连接参数在 `data_generator/config.py` 的 `MYSQL` 字典中，按本机实际情况修改。
+
+### 方式一：只看可视化平台（最常用，约 10 秒）
+
+平台所需的统计结果、模型指标、网络数据已预置在数据库备份中，无需重跑 Spark。
+
+```bash
+# 完成上面的「前置准备」后，直接启动
+cd web
 python app.py
 ```
 
@@ -135,10 +147,13 @@ MedHealth/
 │   ├── app.py               # 应用入口与路由
 │   ├── templates/           # 13 个页面模板
 │   └── static/              # CSS / JS / ECharts / Bootstrap
-├── deploy/                  # Linux 集群部署脚本
+├── database/                # 数据库备份
+│   └── med_health_数据备份.sql  # 完整业务数据 + 统计结果（0.97 MB）
+├── deploy/                  # Linux 集群部署脚本（9 个）
 ├── docs/                    # 项目文档
 ├── images/                  # 架构图与界面截图
 ├── report/                  # 课程设计报告（前端版 / 后端版）
+├── requirements.txt         # Python 依赖清单
 └── run_all.py               # 一键全链路复现脚本
 ```
 
@@ -233,11 +248,20 @@ ADS (应用层)
 
 ### 关于原始迁移包
 
-原始迁移包约 **5.7 GB**，其中包含现成虚拟机镜像（4.86 GB）、大数据组件安装包、MySQL 免安装版等**环境素材**。本仓库仅保留**工程源码与文档**，环境部分请自行准备：
+原始迁移包约 **5.7 GB**，其中包含现成虚拟机镜像（4.86 GB）、大数据组件安装包、MySQL 免安装版等**环境素材**。本仓库保留了**工程源码、数据库备份、依赖清单、部署脚本与全部文档**，足以在新电脑上复现：
 
-- 大数据环境：Hadoop 3.x + Hive 3.x + Spark 3.x + Kafka + ZooKeeper
-- 数据库：MySQL 8.0
-- Python 环境：Python 3.10+
+| 复现所需 | 本仓库位置 |
+|---|---|
+| Python 依赖 | `requirements.txt` |
+| 数据库数据与统计结果 | `database/med_health_数据备份.sql` |
+| 集群部署脚本 | `deploy/`（9 个脚本，含一键启动） |
+| 源码与文档 | 全量保留 |
+
+**需自行准备的环境**（这些是通用软件，不属于项目内容）：
+
+- MySQL 8.0（或使用任意可访问的 MySQL 实例）
+- 大数据环境（可选）：Hadoop 3.x + Hive 3.x + Spark 3.x + Kafka + ZooKeeper
+- Python 3.10+
 
 `output/` 目录下的数据产物（约 134 MB 的 CSV）为可再生的中间结果，未纳入版本控制，运行 `run_all.py` 即可重新生成。
 
